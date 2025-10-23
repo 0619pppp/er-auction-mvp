@@ -6,9 +6,8 @@ import CurrentLotCard from './components/CurrentLotCard'
 const fmtSec = (ms) => Math.max(0, Math.ceil((ms - Date.now())/1000))
 
 export default function App() {
-
   const [mode, setMode] = useState('lobby') // lobby | room
-  const [name, setName] = useState('팀장A')
+  const [name, setName] = useState('')      // 기본 이름 없음
   const [role, setRole] = useState('leader')
 
   const [pChar, setPChar] = useState(['','',''])
@@ -17,8 +16,6 @@ export default function App() {
   const [state, setState] = useState(null)
   const [feed, setFeed] = useState([])
   const [myId, setMyId] = useState(null)
-  const myLeader = myId && state?.leaders ? state.leaders[myId] : null
-  const pickCount = state?.settings?.pickCount ?? 2
 
   useEffect(() => {
     socket.on('state', st => setState(st))
@@ -35,11 +32,12 @@ export default function App() {
 
   useEffect(() => {
     if (!state?.currentLot?.endsAt) return
-    const iv=setInterval(()=>setState(p=>({...p})),250) // 타이머/진행률 리렌더
+    const iv=setInterval(()=>setState(p=>({...p})),250)
     return ()=>clearInterval(iv)
   },[state?.currentLot?.endsAt])
 
   const joinRoom=()=>{ 
+    if (!name.trim()) { alert('이름을 입력하세요.'); return; }
     const info={ role, name }
     if(role==='player') info.playerInfo={ name, characters:pChar.filter(Boolean), motto:pMotto }
     socket.emit('join_room', info); 
@@ -47,13 +45,17 @@ export default function App() {
   }
   const startAuction=()=>socket.emit('start_auction')
   const bidAbs=(v)=>socket.emit('bid',{amount:v})
+  const resetRoom=()=>socket.emit('reset_room')
   const nextLot=()=>socket.emit('next_lot')
+
+  const myLeader = myId && state?.leaders ? state.leaders[myId] : null
+  const pickCount = state?.settings?.pickCount ?? 2
 
   if(mode==='lobby')return(
     <main className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-xl mb-4">ER 경매</h1>
+      <h1 className="text-xl mb-4">ER 자낳대 경매</h1>
       <div className="grid gap-3">
-        <input placeholder="이름" value={name} onChange={e=>setName(e.target.value)}/>
+        <input placeholder="이름 적는칸" value={name} onChange={e=>setName(e.target.value)}/>
         <select value={role} onChange={e=>setRole(e.target.value)}>
           <option value="leader">팀장</option>
           <option value="player">플레이어</option>
@@ -83,11 +85,13 @@ export default function App() {
       <section className="md:col-span-2">
         <AuctionBoard leaders={state?.leaders||{}}/>
       </section>
+
       <section className="space-y-6">
         <CurrentLotCard lot={state?.currentLot}
                         onBidAbs={bidAbs} onStart={startAuction}
-                        onNext={nextLot} started={!!state?.started}
+                        started={!!state?.started}
                         myId={myId} myLeader={myLeader} pickCount={pickCount}/>
+
         <div className="card">
           <h4 className="text-base mb-3">남은 플레이어</h4>
           <ol className="space-y-2 list-decimal list-inside">
@@ -95,6 +99,7 @@ export default function App() {
               <li key={p.id} className="text-sm">{p.name}</li>)}
           </ol>
         </div>
+
         <div className="card">
           <h4 className="text-base mb-3">경매 피드</h4>
           <div className="h-56 overflow-auto space-y-1 text-sm">
@@ -103,8 +108,9 @@ export default function App() {
                 <code className="text-xs text-textSub mr-2">{new Date(m.t).toLocaleTimeString()}</code>{m.text}
               </div>)}
           </div>
-          <div className="mt-3 text-right">
-            <button onClick={()=>socket.emit('reset_room')} className="ghost px-3 py-2 text-sm">방 초기화</button>
+          <div className="mt-3 flex justify-end gap-2">
+            <button onClick={resetRoom} className="ghost px-3 py-2 text-sm">방 초기화</button>
+            <button onClick={nextLot} className="ghost px-3 py-2 text-sm">다음 플레이어</button>
           </div>
         </div>
       </section>

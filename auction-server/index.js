@@ -5,6 +5,8 @@ import { Server } from "socket.io";
 
 const app = express();
 app.use(cors({ origin: true }));
+
+// health
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 app.get("/", (_req, res) => res.type("text").send("OK"));
 
@@ -21,7 +23,7 @@ const DEFAULT_SETTINGS = {
   pickCount: 2,
   lotTimeSec: 20,
   onRaiseResetSec: 10,
-  previewSec: 30,
+  previewSec: 20,
   minReservePerSlot: 0
 };
 
@@ -34,9 +36,11 @@ function createRoom(code = DEFAULT_CODE, settings = {}) {
     playersQueue: [],     // [{id,name,characters,motto}]
     currentLot: null,     // {player,highestBid,highestBidder,endsAt,phase,totalSec,lastBidderId,timer}
     started: false,
-    // 개선: 유찰 모음 + 라운드 플래그
+    // 유찰 라운드 지원
     unsold: [],
     secondRound: false,
+    unsoldPass: 0,
+    logs: []
   };
   rooms.set(code, state);
   return state;
@@ -46,11 +50,11 @@ function getRoom() {
   return rooms.get(DEFAULT_CODE);
 }
 
-// ===== 브로드캐스트 / 직렬화 =====
+// ===== broadcast / shape =====
 function sanitize(state) {
   return {
     code: state.code,
-    settings: state.settings, // pickCount 노출
+    settings: state.settings,
     leaders: state.leaders,
     playersQueue: state.playersQueue,
     currentLot: state.currentLot
@@ -66,7 +70,8 @@ function sanitize(state) {
         }
       : null,
     started: state.started,
-    secondRound: state.secondRound
+    secondRound: state.secondRound,
+    unsoldPass: state.unsoldPass
   };
 }
 const publish = (state) => io.emit("state", sanitize(state));
@@ -105,13 +110,14 @@ function startBidding(state){
   publish(state);
 }
 function proceedNextLot(state){
-  // 플레이어 큐가 비었으면: 유찰 라운드로 전환 또는 종료
+  // 본 라운드 종료 → 유찰 라운드로 전환. 유찰 라운드 반복.
   if (state.playersQueue.length === 0) {
-    if (!state.secondRound && state.unsold.length > 0) {
+    if (state.unsold.length > 0) {
       state.playersQueue = state.unsold;
       state.unsold = [];
       state.secondRound = true;
-      sys("유찰 라운드 시작");
+      state.unsoldPass += 1;
+      sys(`유찰 라운드 시작 (패스 ${state.unsoldPass})`);
       publish(state);
     } else {
       state.started = false;
@@ -143,9 +149,24 @@ function finishCurrentLot(state){
     leader.picks.push(lot.player);
     sys(`낙찰: ${leader.name} ← ${lot.player.name} @ ${lot.highestBid}pt`);
   } else {
-    sys(`유찰: ${lot.player.name}`);
-    // 개선: 유찰 모음에 보관 → 본 라운드 끝나면 재경매
-    state.unsold.push(lot.player);
+    // 유찰 라운드에서 무입찰이면 강제 배정하여 반드시 소속 생성
+    if (state.secondRound) {
+      const leadersArr = Object.values(state.leaders || {});
+      const candidates = leadersArr.filter(l => l.picks.length < state.settings.pickCount);
+      if (candidates.length > 0) {
+        candidates.sort((a,b)=> b.pointsLeft - a.pointsLeft || a.name.localeCompare(b.name));
+        const winner = candidates[0];
+        winner.picks.push(lot.player); // 0pt 강제 배정
+        sys(`무입찰 배정: ${winner.name} ← ${lot.player.name} @ 0pt`);
+      } else {
+        // 모든 팀장이 슬롯을 채웠다면 다음 패스에서 다시 시도
+        sys(`유찰 지속: ${lot.player.name}`);
+        state.unsold.push(lot.player);
+      }
+    } else {
+      sys(`유찰: ${lot.player.name}`);
+      state.unsold.push(lot.player);
+    }
   }
   state.currentLot = null;
   publish(state);
@@ -158,8 +179,14 @@ function canBid(state, leaderId, amount){
   if (!state.currentLot) return [false, "현재 경매 없음"];
   if (state.currentLot.phase !== "bidding") return [false, "아직 호가 시작 전입니다."];
   if (state.currentLot.lastBidderId === leaderId) return [false, "연속 호가 불가"];
-  // 개선: 팀장 픽 2명 채우면 입찰 불가
   if (leader.picks.length >= state.settings.pickCount) return [false, "팀원 완료로 입찰 불가"];
+
+  // 유찰 라운드에서 0 입찰 허용: 잔여 0이고 현재가 0일 때만
+  if (state.secondRound && amount === 0) {
+    if (leader.pointsLeft === 0 && (state.currentLot.highestBid || 0) === 0) return [true, null];
+    return [false, "0 입찰은 잔여 0일 때만 가능"];
+  }
+
   if (amount < state.currentLot.highestBid + state.settings.bidStep) return [false, "입찰 단위 미달"];
   const remainingSlots = state.settings.pickCount - leader.picks.length;
   const mustReserve = Math.max(0, remainingSlots - 1) * state.settings.minReservePerSlot;
@@ -167,7 +194,7 @@ function canBid(state, leaderId, amount){
   return [true, null];
 }
 
-// ===== 소켓 =====
+// ===== sockets =====
 io.on("connection", (socket) => {
   const state = getRoom();
   socket.join(DEFAULT_CODE);
@@ -212,6 +239,7 @@ io.on("connection", (socket) => {
     state.started = true;
     state.secondRound = false;
     state.unsold = [];
+    state.unsoldPass = 0;
     sys("경매 시작");
     proceedNextLot(state);
   });

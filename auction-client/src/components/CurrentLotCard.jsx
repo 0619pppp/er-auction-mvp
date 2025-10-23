@@ -7,7 +7,7 @@ function fmt(msLeft) {
   return `${mm}:${ss}`
 }
 
-export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started, myId, myLeader, pickCount = 2 }) {
+export default function CurrentLotCard({ lot, onBidAbs, onStart, started, myId, myLeader, pickCount = 2 }) {
   const [manual, setManual] = useState('')
 
   useEffect(() => {
@@ -35,7 +35,6 @@ export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started
     return (
       <div className="card text-center">
         <p className="text-slate-300">현재 진행 중인 경매가 없습니다.</p>
-        <button onClick={onNext} className="ghost mt-3 px-5 py-2">다음 로트</button>
       </div>
     )
   }
@@ -48,7 +47,9 @@ export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started
 
   const submitManual = () => {
     const v = Number(manual)
-    if (!Number.isFinite(v) || v <= (highestBid||0)) return
+    if (!Number.isFinite(v)) return
+    // 절대가: 유찰 라운드 0입찰은 서버가 검증. 클라에서는 상한만 체크.
+    if (v <= (highestBid||0) && v !== 0) return
     onBidAbs(v)
   }
 
@@ -135,17 +136,13 @@ export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started
             onChange={e=>setManual(e.target.value)}
             onKeyDown={e=>{ if (e.key==='Enter' && !disableBid) submitManual() }}
             className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2"
-            placeholder={`절대가 입력 (>= ${ (highestBid||0)+10 })`}
+            placeholder={`절대가 입력 (현재 ${ (highestBid||0) }pt) — 유찰라운드 0 가능`}
             disabled={disableBid}
           />
           <button onClick={submitManual} disabled={disableBid} className="ghost px-4 py-2 text-sm">
             입력가 입찰
           </button>
         </div>
-      </div>
-
-      <div className="mt-4 text-right">
-        <button onClick={onNext} className="ghost px-4 py-2 text-sm">다음 로트</button>
       </div>
     </div>
   )
