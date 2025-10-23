@@ -1,4 +1,5 @@
 import { io } from "socket.io-client";
 
-const SERVER = "https://er-auction-mvp.onrender.com"; // 예: https://er-auction-server.onrender.com
-export const socket = io(SERVER, { transports: ["websocket"] });
+// Render 서버 주소로 교체
+const SERVER = "https://er-auction-mvp.onrender.com"; // 예: https://er-auction-mvp.onrender.com
+export const makeSocket = () => io(SERVER, { transports: ["websocket"] });
