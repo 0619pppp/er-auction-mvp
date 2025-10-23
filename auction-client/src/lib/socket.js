@@ -1,6 +1,4 @@
 import { io } from "socket.io-client";
 
-const defaultURL = import.meta.env.VITE_API_URL || "https://er-auction-server.onrender.com";
-
-export const makeSocket = (baseURL = defaultURL) =>
-  io(baseURL, { transports: ["websocket"] });
+const SERVER = "https://er-auction-mvp.onrender.com"; // 예: https://er-auction-server.onrender.com
+export const socket = io(SERVER, { transports: ["websocket"] });
