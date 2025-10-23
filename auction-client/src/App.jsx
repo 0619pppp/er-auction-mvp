@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { socket } from './lib/socket'
 import AuctionBoard from './components/AuctionBoard'
 import CurrentLotCard from './components/CurrentLotCard'
@@ -17,6 +17,8 @@ export default function App() {
   const [state, setState] = useState(null)
   const [feed, setFeed] = useState([])
   const [myId, setMyId] = useState(null)
+  const myLeader = myId && state?.leaders ? state.leaders[myId] : null
+  const pickCount = state?.settings?.pickCount ?? 2
 
   useEffect(() => {
     socket.on('state', st => setState(st))
@@ -49,7 +51,7 @@ export default function App() {
 
   if(mode==='lobby')return(
     <main className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-xl mb-4">ER 자낳대 경매</h1>
+      <h1 className="text-xl mb-4">ER 경매</h1>
       <div className="grid gap-3">
         <input placeholder="이름" value={name} onChange={e=>setName(e.target.value)}/>
         <select value={role} onChange={e=>setRole(e.target.value)}>
@@ -85,7 +87,7 @@ export default function App() {
         <CurrentLotCard lot={state?.currentLot}
                         onBidAbs={bidAbs} onStart={startAuction}
                         onNext={nextLot} started={!!state?.started}
-                        myId={myId}/>
+                        myId={myId} myLeader={myLeader} pickCount={pickCount}/>
         <div className="card">
           <h4 className="text-base mb-3">남은 플레이어</h4>
           <ol className="space-y-2 list-decimal list-inside">
@@ -100,6 +102,9 @@ export default function App() {
               <div key={i} className="text-slate-200">
                 <code className="text-xs text-textSub mr-2">{new Date(m.t).toLocaleTimeString()}</code>{m.text}
               </div>)}
+          </div>
+          <div className="mt-3 text-right">
+            <button onClick={()=>socket.emit('reset_room')} className="ghost px-3 py-2 text-sm">방 초기화</button>
           </div>
         </div>
       </section>

@@ -7,7 +7,7 @@ function fmt(msLeft) {
   return `${mm}:${ss}`
 }
 
-export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started, myId }) {
+export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started, myId, myLeader, pickCount = 2 }) {
   const [manual, setManual] = useState('')
 
   useEffect(() => {
@@ -43,7 +43,8 @@ export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started
   const { player, highestBid, highestBidder, phase } = lot
   const preview = phase === 'preview'
   const iAmTop = !!myId && highestBidder?.id === myId
-  const disableBid = preview || iAmTop
+  const atCapacity = (myLeader?.picks?.length || 0) >= pickCount
+  const disableBid = preview || iAmTop || atCapacity
 
   const submitManual = () => {
     const v = Number(manual)
@@ -107,6 +108,11 @@ export default function CurrentLotCard({ lot, onBidAbs, onStart, onNext, started
           {iAmTop && (
             <div className="text-[11px] px-2 py-1 rounded bg-slate-700 text-slate-200">
               연속 호가 불가
+            </div>
+          )}
+          {atCapacity && (
+            <div className="text-[11px] px-2 py-1 rounded bg-slate-700 text-slate-200">
+              팀원 2명 완료
             </div>
           )}
         </div>

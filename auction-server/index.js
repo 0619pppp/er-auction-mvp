@@ -5,8 +5,6 @@ import { Server } from "socket.io";
 
 const app = express();
 app.use(cors({ origin: true }));
-
-// 헬스 체크
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 app.get("/", (_req, res) => res.type("text").send("OK"));
 
@@ -36,7 +34,9 @@ function createRoom(code = DEFAULT_CODE, settings = {}) {
     playersQueue: [],     // [{id,name,characters,motto}]
     currentLot: null,     // {player,highestBid,highestBidder,endsAt,phase,totalSec,lastBidderId,timer}
     started: false,
-    logs: []
+    // 개선: 유찰 모음 + 라운드 플래그
+    unsold: [],
+    secondRound: false,
   };
   rooms.set(code, state);
   return state;
@@ -46,9 +46,11 @@ function getRoom() {
   return rooms.get(DEFAULT_CODE);
 }
 
+// ===== 브로드캐스트 / 직렬화 =====
 function sanitize(state) {
   return {
     code: state.code,
+    settings: state.settings, // pickCount 노출
     leaders: state.leaders,
     playersQueue: state.playersQueue,
     currentLot: state.currentLot
@@ -63,7 +65,8 @@ function sanitize(state) {
           totalSec: state.currentLot.totalSec || 0
         }
       : null,
-    started: state.started
+    started: state.started,
+    secondRound: state.secondRound
   };
 }
 const publish = (state) => io.emit("state", sanitize(state));
@@ -102,11 +105,20 @@ function startBidding(state){
   publish(state);
 }
 function proceedNextLot(state){
-  if (!state.playersQueue.length) {
-    state.started = false;
-    sys("경매 종료");
-    publish(state);
-    return;
+  // 플레이어 큐가 비었으면: 유찰 라운드로 전환 또는 종료
+  if (state.playersQueue.length === 0) {
+    if (!state.secondRound && state.unsold.length > 0) {
+      state.playersQueue = state.unsold;
+      state.unsold = [];
+      state.secondRound = true;
+      sys("유찰 라운드 시작");
+      publish(state);
+    } else {
+      state.started = false;
+      sys("경매 종료");
+      publish(state);
+      return;
+    }
   }
   const player = state.playersQueue.shift();
   state.currentLot = {
@@ -132,7 +144,8 @@ function finishCurrentLot(state){
     sys(`낙찰: ${leader.name} ← ${lot.player.name} @ ${lot.highestBid}pt`);
   } else {
     sys(`유찰: ${lot.player.name}`);
-    state.playersQueue.push(lot.player); // 원하면 주석 처리
+    // 개선: 유찰 모음에 보관 → 본 라운드 끝나면 재경매
+    state.unsold.push(lot.player);
   }
   state.currentLot = null;
   publish(state);
@@ -145,6 +158,8 @@ function canBid(state, leaderId, amount){
   if (!state.currentLot) return [false, "현재 경매 없음"];
   if (state.currentLot.phase !== "bidding") return [false, "아직 호가 시작 전입니다."];
   if (state.currentLot.lastBidderId === leaderId) return [false, "연속 호가 불가"];
+  // 개선: 팀장 픽 2명 채우면 입찰 불가
+  if (leader.picks.length >= state.settings.pickCount) return [false, "팀원 완료로 입찰 불가"];
   if (amount < state.currentLot.highestBid + state.settings.bidStep) return [false, "입찰 단위 미달"];
   const remainingSlots = state.settings.pickCount - leader.picks.length;
   const mustReserve = Math.max(0, remainingSlots - 1) * state.settings.minReservePerSlot;
@@ -179,6 +194,14 @@ io.on("connection", (socket) => {
     publish(state);
   });
 
+  // 방 초기화
+  socket.on("reset_room", () => {
+    rooms.delete(DEFAULT_CODE);
+    const fresh = createRoom(DEFAULT_CODE);
+    sys("방이 초기화되었습니다.");
+    publish(fresh);
+  });
+
   socket.on("start_auction", () => {
     if (state.started) return;
     // 셔플
@@ -187,6 +210,8 @@ io.on("connection", (socket) => {
       [state.playersQueue[i], state.playersQueue[j]] = [state.playersQueue[j], state.playersQueue[i]];
     }
     state.started = true;
+    state.secondRound = false;
+    state.unsold = [];
     sys("경매 시작");
     proceedNextLot(state);
   });
@@ -216,6 +241,7 @@ io.on("connection", (socket) => {
       sys(`팀장 퇴장: ${nm}`);
     } else {
       state.playersQueue = state.playersQueue.filter(p => p.id !== socket.id);
+      state.unsold = state.unsold.filter(p => p.id !== socket.id);
     }
     publish(state);
   });
