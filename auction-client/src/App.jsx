@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { makeSocket } from './lib/socket'
+import { socket } from './lib/socket'
 import AuctionBoard from './components/AuctionBoard'
 import CurrentLotCard from './components/CurrentLotCard'
 
 const fmtSec = (ms) => Math.max(0, Math.ceil((ms - Date.now())/1000))
 
 export default function App() {
-  const socket = makeSocket()
 
   const [mode, setMode] = useState('lobby') // lobby | room
   const [name, setName] = useState('팀장A')
