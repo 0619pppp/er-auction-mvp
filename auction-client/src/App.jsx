@@ -4,7 +4,8 @@ import AuctionBoard from './components/AuctionBoard'
 import CurrentLotCard from './components/CurrentLotCard'
 
 export default function App() {
-  const [baseURL, setBaseURL] = useState('http://localhost:4000')
+  const PROD_URL = import.meta.env.VITE_API_URL || "https://<your-render>.onrender.com";
+  const [baseURL, setBaseURL] = useState(PROD_URL);
   const [socket, setSocket] = useState(null)
   const [mode, setMode] = useState('lobby')
   const [roomCode, setRoomCode] = useState('ER1')
