@@ -1,3 +1,3 @@
 import { io } from "socket.io-client";
-export const makeSocket = (baseURL = "http://localhost:4000") =>
+export const makeSocket = (baseURL = "https://er-auction.onrender.com") =>
   io(baseURL, { transports: ["websocket"] });
