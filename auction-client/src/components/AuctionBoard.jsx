@@ -1,8 +1,6 @@
 export default function AuctionBoard({ leaders }) {
   const items = Object.values(leaders || {})
-  if (!items.length) {
-    return <div className="card text-slate-300">팀장이 아직 없습니다.</div>
-  }
+  if (!items.length) return <div className="card text-slate-300">팀장이 아직 없습니다.</div>
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
       {items.map(l => (
@@ -13,11 +11,8 @@ export default function AuctionBoard({ leaders }) {
           </div>
           <div className="space-y-2">
             {[0,1].map(i => (
-              <div
-                key={i}
-                className="h-10 flex items-center justify-center rounded-xl border border-slate-600 bg-slate-800 text-slate-200 text-sm font-medium"
-              >
-                {l.picks[i]?.name || l.picks[i]?.player?.name || '— 빈 슬롯 —'}
+              <div key={i} className="h-10 flex items-center justify-center rounded-xl border border-slate-600 bg-slate-800 text-slate-200 text-sm font-medium">
+                {l.picks[i]?.name || '— 빈 슬롯 —'}
               </div>
             ))}
           </div>
