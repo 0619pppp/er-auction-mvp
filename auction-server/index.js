@@ -5,10 +5,13 @@ import { Server } from "socket.io";
 
 const app = express();
 app.use(cors({ origin: true }));
+
+// 헬스체크 + 루트 응답
 app.get("/health", (_, res) => res.json({ ok: true }));
+app.get("/", (_, res) => res.type("text").send("OK"));
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: true, methods: ["GET", "POST"] } });
+const io = new Server(server, { cors: { origin: true, methods: ["GET","POST"] } });
 
 // In-memory 상태
 const rooms = new Map();
