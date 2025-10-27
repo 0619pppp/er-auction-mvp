@@ -419,26 +419,43 @@ io.on("connection", (socket) => {
 
   // 경매 시작
   socket.on("start_auction", () => {
-    if (state.started) return;
+  if (state.started) return;
 
-    // playersQueue 셔플
-    for (let i = state.playersQueue.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [state.playersQueue[i], state.playersQueue[j]] = [
-        state.playersQueue[j],
-        state.playersQueue[i]
-      ];
+  // 1️⃣ 플레이어 순서 랜덤 셔플
+  for (let i = state.playersQueue.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [state.playersQueue[i], state.playersQueue[j]] = [
+      state.playersQueue[j],
+      state.playersQueue[i]
+    ];
+  }
+
+  state.started = true;
+  state.secondRound = false;
+  state.unsold = [];
+  state.unsoldPass = 0;
+  state.paused = false;
+
+  sys("경매 순서 확정. 전략 준비 시간 60초가 주어집니다.");
+  publish(state);
+
+  // 2️⃣ 1분 준비 타이머
+  clearTimer(state);
+  state.currentLot = null;
+  let countdown = 60;
+  state.strategyTimer = setInterval(() => {
+    countdown--;
+    sys(`전략 준비 중... ${countdown}s 남음`);
+    publish(state);
+    if (countdown <= 0) {
+      clearInterval(state.strategyTimer);
+      sys("전략 시간 종료. 첫 매물이 등장합니다.");
+      publish(state);
+      proceedNextLot(state); // 첫 로트 시작
     }
+  }, 1000);
+});
 
-    state.started = true;
-    state.secondRound = false;
-    state.unsold = [];
-    state.unsoldPass = 0;
-    state.paused = false;
-
-    sys("경매 시작");
-    proceedNextLot(state);
-  });
 
   // 입찰
   socket.on("bid", ({ amount }) => {
