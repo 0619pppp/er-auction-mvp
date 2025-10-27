@@ -26,9 +26,9 @@ const DEFAULT_SETTINGS = {
   maxPoints: 500,
   bidStep: 10,
   pickCount: 2,
-  lotTimeSec: 10,
+  lotTimeSec: 20,
   onRaiseResetSec: 10,
-  previewSec: 20,
+  previewSec: 30,
   minReservePerSlot: 0
 };
 
@@ -42,12 +42,14 @@ function createRoom(code = DEFAULT_CODE, settings = {}) {
     playersQueue: [],           // [{id,name,characters,motto}]
     lastUploadedPlayers: [],    // 업로드된 최신 선수 풀
 
-    currentLot: null,           // {player,highestBid,highestBidder,endsAt,phase,totalSec,lastBidderId,timer}
+    currentLot: null,           // {player,highestBid,highestBidder,endsAt,phase,totalSec,lastBidderId,timer,pauseRemainingMs}
     started: false,
 
     unsold: [],
     secondRound: false,
     unsoldPass: 0,
+
+    paused: false,              // 일시정지 여부
 
     logs: []
   };
@@ -80,7 +82,8 @@ function sanitize(state) {
       : null,
     started: state.started,
     secondRound: state.secondRound,
-    unsoldPass: state.unsoldPass
+    unsoldPass: state.unsoldPass,
+    paused: state.paused
   };
 }
 const publish = (state) => io.emit("state", sanitize(state));
@@ -93,12 +96,37 @@ function clearTimer(state) {
     state.currentLot.timer = null;
   }
 }
+
 function startTimer(state, seconds) {
   clearTimer(state);
   state.currentLot.totalSec = seconds;
   state.currentLot.endsAt = Date.now() + seconds * 1000;
   state.currentLot.timer = setInterval(() => {
     if (!state.currentLot) return clearTimer(state);
+
+    // 일시정지 중이면 타이머 진행 멈춘다
+    if (state.paused) return;
+
+    if (Date.now() >= state.currentLot.endsAt) {
+      clearTimer(state);
+      if (state.currentLot.phase === "preview") startBidding(state);
+      else finishCurrentLot(state);
+    } else {
+      publish(state);
+    }
+  }, 250);
+}
+
+// 재개용 남은시간 기반 타이머
+function startTimerWithRemaining(state, secondsLeft) {
+  clearTimer(state);
+  state.currentLot.totalSec = secondsLeft;
+  state.currentLot.endsAt = Date.now() + secondsLeft * 1000;
+  state.currentLot.timer = setInterval(() => {
+    if (!state.currentLot) return clearTimer(state);
+
+    // 일시정지 중이면 타이머 진행 멈춘다
+    if (state.paused) return;
 
     if (Date.now() >= state.currentLot.endsAt) {
       clearTimer(state);
@@ -113,11 +141,12 @@ function startTimer(state, seconds) {
 // ===== 경매 단계 =====
 function startPreview(state) {
   state.currentLot.phase = "preview";
-  state.currentLot.lastBidderId = null; // 연속호가 리셋
+  state.currentLot.lastBidderId = null;
   sys(`소개 시작: ${state.currentLot.player.name}`);
   startTimer(state, state.settings.previewSec);
   publish(state);
 }
+
 function startBidding(state) {
   state.currentLot.phase = "bidding";
   sys("호가 시작");
@@ -125,9 +154,8 @@ function startBidding(state) {
   publish(state);
 }
 
-// 로트 진행
+// 다음 로트 진행
 function proceedNextLot(state) {
-  // 큐 비었으면 유찰 라운드로 들어가거나 종료
   if (state.playersQueue.length === 0) {
     if (state.unsold.length > 0) {
       state.playersQueue = state.unsold;
@@ -153,7 +181,8 @@ function proceedNextLot(state) {
     phase: "preview",
     totalSec: 0,
     lastBidderId: null,
-    timer: null
+    timer: null,
+    pauseRemainingMs: null
   };
   startPreview(state);
 }
@@ -170,29 +199,9 @@ function finishCurrentLot(state) {
     leader.picks.push(lot.player);
     sys(`낙찰: ${leader.name} ← ${lot.player.name} @ ${lot.highestBid}pt`);
   } else {
-    // 무입찰
-    if (state.secondRound) {
-      // 유찰 라운드에서는 무입찰이면 강제 배정 (0pt)
-      const leadersArr = Object.values(state.leaders || {});
-      const candidates = leadersArr.filter(l => l.picks.length < state.settings.pickCount);
-
-      if (candidates.length > 0) {
-        candidates.sort(
-          (a, b) => b.pointsLeft - a.pointsLeft || a.name.localeCompare(b.name)
-        );
-        const winner = candidates[0];
-        winner.picks.push(lot.player);
-        sys(`무입찰 배정: ${winner.name} ← ${lot.player.name} @ 0pt`);
-      } else {
-        // 전원 슬롯 꽉 찼으면 다시 유찰 목록으로
-        sys(`유찰 지속: ${lot.player.name}`);
-        state.unsold.push(lot.player);
-      }
-    } else {
-      // 본 라운드 유찰 -> unsold에 넣음. 나중에 secondRound에서 다시 돌림
-      sys(`유찰: ${lot.player.name}`);
-      state.unsold.push(lot.player);
-    }
+    // 입찰자 없음 → 무조건 유찰
+    sys(`유찰: ${lot.player.name}`);
+    state.unsold.push(lot.player);
   }
 
   state.currentLot = null;
@@ -202,6 +211,9 @@ function finishCurrentLot(state) {
 
 // 입찰 제한
 function canBid(state, leaderId, amount) {
+  // 일시정지 상태면 입찰 불가
+  if (state.paused) return [false, "일시정지 상태"];
+
   const leader = state.leaders[leaderId];
   if (!leader) return [false, "팀장이 아님"];
   if (!state.currentLot) return [false, "현재 경매 없음"];
@@ -230,7 +242,8 @@ function canBid(state, leaderId, amount) {
   // 잔여 포인트 체크
   const remainingSlots = state.settings.pickCount - leader.picks.length;
   const mustReserve =
-    Math.max(0, remainingSlots - 1) * state.settings.minReservePerSlot;
+    Math.max(0, remainingSlots - 1) *
+    state.settings.minReservePerSlot;
   if (amount > leader.pointsLeft - mustReserve)
     return [false, "보유 포인트 초과"];
 
@@ -241,7 +254,7 @@ function canBid(state, leaderId, amount) {
 function resetRoomState(state) {
   clearTimer(state);
 
-  // 팀장들 리셋 (돈 / picks)
+  // 팀장들 리셋
   for (const id of Object.keys(state.leaders)) {
     state.leaders[id].pointsLeft = state.settings.maxPoints;
     state.leaders[id].picks = [];
@@ -256,6 +269,7 @@ function resetRoomState(state) {
   state.unsold = [];
   state.secondRound = false;
   state.unsoldPass = 0;
+  state.paused = false;
 
   sys("방 초기화되었습니다. (대기 상태)");
   publish(state);
@@ -278,25 +292,72 @@ app.post(
       return res.status(400).json({ ok: false, error: "no file" });
     }
 
-    // CSV 파싱
+    // 1) 업로드된 버퍼를 문자열로 변환하면서 BOM 제거
+    //    일부 엑셀 CSV는 UTF-8 BOM(\ufeff)을 앞에 붙인다.
+    let rawText;
+    try {
+      rawText = req.file.buffer.toString("utf8");
+      // BOM 제거
+      if (rawText.charCodeAt(0) === 0xfeff) {
+        rawText = rawText.slice(1);
+      }
+    } catch {
+      return res.status(400).json({ ok: false, error: "encoding fail" });
+    }
+
+    // 2) csv-parse로 rows 파싱
     let rows;
     try {
-      rows = parse(req.file.buffer, { columns: true, skip_empty_lines: true });
+      rows = parse(rawText, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true
+      });
     } catch {
       return res.status(400).json({ ok: false, error: "csv parse fail" });
     }
 
-    // CSV → playersQueue
-    const newPlayers = rows.map((r, i) => ({
-      id: `p${Date.now()}_${i}`,
-      name: (r.name || "").trim() || `플레이어${i}`,
-      characters: r.characters
-        ? r.characters.split(",").map(s => s.trim()).slice(0, 3)
-        : [],
-      motto: (r.motto || "").trim()
-    }));
+    // 3) 컬럼 키 정규화
+    //    혹시 헤더가 "﻿name" (BOM 섞인 name) 같은 식으로 들어오면 여기서 name으로 바꿔준다.
+    //    로우마다 키를 깨끗하게 다시 만든다.
+    const cleanedRows = rows.map((row) => {
+      const normalized = {};
+      for (const [key, val] of Object.entries(row)) {
+        // key에서 BOM류 제거나 양끝 공백 제거
+        const cleanKey = key
+          .replace(/^\uFEFF+/, "") // BOM 제거
+          .trim()
+          .toLowerCase(); // name / Name / NAME 전부 name 처리
 
-    // 상태 갱신
+        normalized[cleanKey] = typeof val === "string" ? val.trim() : val;
+      }
+      return normalized;
+    });
+
+    // 4) 서버 내부 player 오브젝트 만들기
+    const newPlayers = cleanedRows.map((r, i) => {
+      // r.name 이나 r["이름"] 등 다른 컬럼명을 못쓰는 참가자는 지금 안 다룬다.
+      // 여기서는 name만 본다. 만약 name이 비어 있으면 fallback.
+      const finalName = r.name && r.name.length > 0
+        ? r.name
+        : `플레이어${i}`;
+
+      const charsField = r.characters || "";
+      const parsedChars = charsField
+        ? charsField.split(",").map(s => s.trim()).filter(Boolean).slice(0, 3)
+        : [];
+
+      const finalMotto = r.motto ? r.motto : "";
+
+      return {
+        id: `p${Date.now()}_${i}`,
+        name: finalName,
+        characters: parsedChars,
+        motto: finalMotto
+      };
+    });
+
+    // 5) 상태 갱신
     state.lastUploadedPlayers = newPlayers.map(p => ({ ...p }));
     state.playersQueue = newPlayers.map(p => ({ ...p }));
 
@@ -307,6 +368,7 @@ app.post(
     state.unsold = [];
     state.secondRound = false;
     state.unsoldPass = 0;
+    state.paused = false;
 
     sys(`플레이어 명단 업로드 (${newPlayers.length}명). 대기상태로 리셋됨.`);
     publish(state);
@@ -331,7 +393,7 @@ io.on("connection", (socket) => {
       };
       sys(`팀장 입장: ${state.leaders[socket.id].name}`);
     } else if (role === "player") {
-      // 수동 추가 (fallback). 보통 운영자 CSV로 넣지만 기능 유지
+      // 수동 추가 fallback
       const p = {
         id: socket.id,
         name:
@@ -350,7 +412,7 @@ io.on("connection", (socket) => {
     publish(state);
   });
 
-  // 방 초기화 버튼. 경매 즉시 중지하고 준비상태로 복귀
+  // 방 초기화 (경매 중지+대기상태 복귀)
   socket.on("reset_room", () => {
     resetRoomState(state);
   });
@@ -372,6 +434,7 @@ io.on("connection", (socket) => {
     state.secondRound = false;
     state.unsold = [];
     state.unsoldPass = 0;
+    state.paused = false;
 
     sys("경매 시작");
     proceedNextLot(state);
@@ -397,22 +460,67 @@ io.on("connection", (socket) => {
     publish(state);
   });
 
-  // 수동 다음 로트
+  // 다음 로트 강제 진행
   socket.on("next_lot", () => {
     if (!state.started) return;
     clearTimer(state);
     finishCurrentLot(state); // finishCurrentLot 안에서 proceedNextLot 호출
   });
 
+  // 일시정지
+  socket.on("pause_auction", () => {
+    if (!state.currentLot || state.paused) return;
+
+    if (state.currentLot.endsAt) {
+      state.currentLot.pauseRemainingMs = Math.max(
+        0,
+        state.currentLot.endsAt - Date.now()
+      );
+    } else {
+      state.currentLot.pauseRemainingMs = null;
+    }
+
+    clearTimer(state);
+    state.paused = true;
+    sys("경매 일시정지");
+    publish(state);
+  });
+
+  // 재개
+  socket.on("resume_auction", () => {
+    if (!state.currentLot || !state.paused) return;
+
+    state.paused = false;
+
+    const ms = state.currentLot.pauseRemainingMs;
+    if (typeof ms === "number" && ms > 0) {
+      const secLeft = Math.ceil(ms / 1000);
+      startTimerWithRemaining(state, secLeft);
+    } else {
+      // 남은 시간이 없으면 현재 phase 기본시간으로 다시
+      if (state.currentLot.phase === "preview") {
+        startTimer(state, state.settings.previewSec);
+      } else {
+        startTimer(state, state.settings.lotTimeSec);
+      }
+    }
+
+    sys("경매 재개");
+    publish(state);
+  });
+
+  // 연결 종료
   socket.on("disconnect", () => {
     if (state.leaders[socket.id]) {
       const nm = state.leaders[socket.id].name;
       delete state.leaders[socket.id];
       sys(`팀장 퇴장: ${nm}`);
     }
-    // 혹시 socket.id 기반으로 들어온 임시 플레이어가 있다면 제거
+
+    // socket 기반으로 임시 등록된 플레이어라면 제거
     state.playersQueue = state.playersQueue.filter(p => p.id !== socket.id);
     state.unsold = state.unsold.filter(p => p.id !== socket.id);
+
     publish(state);
   });
 });

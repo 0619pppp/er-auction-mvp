@@ -14,7 +14,10 @@ export default function CurrentLotCard({
   started,
   myId,
   myLeader,
-  pickCount = 2
+  pickCount = 2,
+  paused,
+  onPause,
+  onResume
 }) {
   const [manual, setManual] = useState('')
 
@@ -36,6 +39,9 @@ export default function CurrentLotCard({
   if (!started) {
     return (
       <div className="card text-center">
+        <h2 className="text-base font-bold mb-2">
+          양혜성배 이터널리턴대회 경매
+        </h2>
         <p className="text-slate-300 mb-3">
           아직 경매가 시작되지 않았습니다.
         </p>
@@ -49,6 +55,9 @@ export default function CurrentLotCard({
   if (!lot) {
     return (
       <div className="card text-center">
+        <h2 className="text-base font-bold mb-2">
+          양혜성배 이터널리턴대회 경매
+        </h2>
         <p className="text-slate-300">
           현재 진행 중인 경매가 없습니다.
         </p>
@@ -61,40 +70,51 @@ export default function CurrentLotCard({
   const iAmTop = !!myId && highestBidder?.id === myId
   const atCapacity = (myLeader?.picks?.length || 0) >= pickCount
 
-  // 버튼/입력 비활성 조건
-  const disableBid = preview || iAmTop || atCapacity
+  // 비활성 조건
+  const disableBid = preview || iAmTop || atCapacity || paused
 
   const submitManual = () => {
     const v = Number(manual)
     if (!Number.isFinite(v)) return
-    // 일반 라운드에서는 최소 현재가 이상이어야 의미 있음
-    // 유찰 라운드의 0입찰은 서버에서 판정하므로 여기선 막지 않는다
     if (v <= (highestBid||0) && v !== 0) return
     onBidAbs(v)
   }
 
   return (
     <div className="card">
-      {/* 상태 + 타이머 */}
-      <div className="mb-2 flex items-center justify-between">
-        <div
-          className={`text-xs rounded-full px-2 py-1 font-medium ${
-            preview
-              ? 'bg-amber-500/20 text-amber-300'
-              : 'bg-emerald-500/20 text-emerald-300'
-          }`}
-        >
-          {preview ? '소개중 (호가 대기)' : '호가 진행중'}
+      {/* 상태 + 타이머 + 일시정지 표시 */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div
+            className={`text-xs rounded-full px-2 py-1 font-medium ${
+              preview
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'bg-emerald-500/20 text-emerald-300'
+            }`}
+          >
+            {preview ? '소개중 (호가 대기)' : '호가 진행중'}
+          </div>
+
+          {paused && (
+            <div className="text-[11px] rounded-full bg-red-600/20 text-red-400 px-2 py-1 font-semibold">
+              일시정지
+            </div>
+          )}
         </div>
-        <div className="text-xs rounded-full bg-slate-700 px-2 py-1 text-slate-200 font-medium">
-          남은 {fmt(msLeft)}
+
+        <div className="flex items-center gap-2">
+          <div className="text-xs rounded-full bg-slate-700 px-2 py-1 text-slate-200 font-medium">
+            남은 {fmt(msLeft)}
+          </div>
         </div>
       </div>
 
       {/* 남은 시간 바 */}
       <div className="w-full h-2 bg-slate-700 rounded mb-4 overflow-hidden">
         <div
-          className="h-2 bg-accent transition-[width] duration-200"
+          className={`h-2 ${
+            paused ? 'bg-slate-500' : 'bg-accent'
+          } transition-[width] duration-200`}
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -103,10 +123,13 @@ export default function CurrentLotCard({
       <div className="mb-4 grid grid-cols-1 gap-3">
         <div>
           <div className="text-xl font-bold">{player.name}</div>
+
           {player.motto && (
             <div className="mt-2 rounded-xl border border-slate-600 bg-slate-800 p-3">
               <div className="text-xs text-textSub mb-1">각오</div>
-              <div className="text-slate-100 italic">“{player.motto}”</div>
+              <div className="text-slate-100 text-sm whitespace-pre-line leading-relaxed break-words">
+                {player.motto}
+              </div>
             </div>
           )}
         </div>
@@ -155,6 +178,11 @@ export default function CurrentLotCard({
               팀원 2명 완료
             </div>
           )}
+          {paused && (
+            <div className="text-[11px] px-2 py-1 rounded bg-slate-700 text-red-400 font-semibold">
+              일시정지 중
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-4 gap-2">
@@ -194,6 +222,10 @@ export default function CurrentLotCard({
           </button>
         </div>
       </div>
+
+      {/* 운영용 일시정지/재개 버튼을 이 카드 아래에 두지 않고
+          상위 영역(App.jsx 쪽 관리자 패널)에 둔다.
+         일단 여기서는 보여주지 않는다. */}
     </div>
   )
 }
