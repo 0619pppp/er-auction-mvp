@@ -28,7 +28,7 @@ const DEFAULT_SETTINGS = {
   pickCount: 2,
   lotTimeSec: 15,
   onRaiseResetSec: 10,
-  previewSec: 30,
+  previewSec: 25,
   minReservePerSlot: 0
 };
 
