@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS = {
   maxPoints: 500,
   bidStep: 10,
   pickCount: 2,
-  lotTimeSec: 20,
+  lotTimeSec: 15,
   onRaiseResetSec: 10,
   previewSec: 30,
   minReservePerSlot: 0
