@@ -18,7 +18,7 @@ app.get("/", (_req, res) => res.type("text").send("OK"));
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// ===== 단일 방 =====
+// ===== 단일 방 =======
 const DEFAULT_CODE = "MAIN";
 const rooms = new Map();
 
